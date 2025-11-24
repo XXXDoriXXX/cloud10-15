@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic[email]
+pydantic-settings
+sqlalchemy
+asyncpg
+psycopg2-binary
+httpx
+redis[async]
+inference-sdk
+gunicorn
