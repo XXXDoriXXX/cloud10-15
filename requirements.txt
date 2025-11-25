@@ -1,6 +1,5 @@
 aiohappyeyeballs==2.6.1
 aiohttp==3.10.11
-aioredis==5.0.0
 aiosignal==1.4.0
 alembic==1.17.2
 annotated-doc==0.0.4
@@ -12,7 +11,6 @@ asyncpg==0.30.0
 attrs==25.4.0
 backoff==2.2.1
 black==25.11.0
-Booktype==1.5
 certifi==2025.11.12
 cfgv==3.5.0
 charset-normalizer==3.4.4
@@ -24,7 +22,6 @@ cycler==0.12.1
 dataclasses-json==0.6.7
 defusedxml==0.7.1
 distlib==0.4.0
-Django==5.2.8
 dnspython==2.8.0
 email-validator==2.3.0
 fakeredis==2.32.1
