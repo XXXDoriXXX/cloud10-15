@@ -42,7 +42,10 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://cloud_6hs9_user:xCgxf50B0V9YC6VzetvsMiR6DCZpsn3q@dpg-d4e4cpqdbo4c73d8ueh0-a.oregon-postgres.render.com/cloud_6hs9
       REDIS_URL: rediss://red-d4eca4npm1nc738ovrq0:Bw5etiIRCER9myVWzRJH2vjxq2N7VhJs@oregon-keyvalue.render.com:6379
 
-      ROBOFLOW_API_KEY: "dummy_key"
+      ROBOFLOW_API_KEY: MvFIiKWMzUpzA3doUVuY
+      ROBOFLOW_API_URL: https://serverless.roboflow.com
+      ROBOFLOW_MODEL_ID: people-detection-o4rdr/11
+
       ENVIRONMENT: test
       PYTHONPATH: .
 
