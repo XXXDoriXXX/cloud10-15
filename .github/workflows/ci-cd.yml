@@ -1,0 +1,144 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+
+  ci:
+    name: 🏗️ Build, Lint & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      postgres:
+        image: postgres:15-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://cloud_6hs9_user:xCgxf50B0V9YC6VzetvsMiR6DCZpsn3q@dpg-d4e4cpqdbo4c73d8ueh0-a.oregon-postgres.render.com/cloud_6hs9
+      REDIS_URL: rediss://red-d4eca4npm1nc738ovrq0:Bw5etiIRCER9myVWzRJH2vjxq2N7VhJs@oregon-keyvalue.render.com:6379
+
+      ROBOFLOW_API_KEY: "dummy_key"
+      ENVIRONMENT: test
+      PYTHONPATH: .
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort pytest pytest-cov pytest-asyncio httpx sentry-sdk redis sqlalchemy asyncpg uvicorn fastapi python-multipart
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+
+      - name: Check Formatting (Black)
+        run: black --check .
+
+      - name: Check Import Sorting (Isort)
+        run: isort --check-only --profile black .
+
+      - name: Lint Code (Flake8)
+        run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+
+      - name: Run Tests with Coverage
+        run: |
+          pytest --cov=app --cov-report=xml --cov-report=term-missing --cov-fail-under=30
+
+      - name: Smoke Test (Verify App Starts)
+        run: |
+          echo "Starting application locally..."
+
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          PID=$!
+          sleep 5
+
+          echo "Checking /health endpoint..."
+
+          curl -v -f http://127.0.0.1:8000/health || curl -v -f http://127.0.0.1:8000/
+
+          echo "Killing application..."
+          kill $PID
+
+  cd:
+    name: Deploy to Render
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Render Deploy
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "Deploy hook secret is missing!"
+            exit 1
+          fi
+          curl -X POST "$RENDER_DEPLOY_HOOK"
+
+  healthcheck:
+    name: Prod Health Check
+    needs: cd
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Wait for Service & Check Health
+        env:
+          HEALTHCHECK_URL: ${{ secrets.RENDER_HEALTHCHECK_URL }}
+        run: |
+          if [ -z "$HEALTHCHECK_URL" ]; then
+            echo "⚠Healthcheck URL secret is missing!"
+            exit 0
+          fi
+
+          echo "Waiting for Render to build and deploy..."
+          sleep 60
+
+          echo "Pinging $HEALTHCHECK_URL..."
+
+          for i in {1..12}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTHCHECK_URL")
+            if [ "$HTTP_CODE" -eq 200 ]; then
+              echo "Production Service is UP and Healthy!"
+              exit 0
+            fi
+            echo "Attempt $i: Status $HTTP_CODE. Retrying in 10s..."
+            sleep 10
+          done
+
+          echo "Service failed to respond with 200 OK after deployment."
+          exit 1
