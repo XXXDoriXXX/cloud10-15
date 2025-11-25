@@ -1,5 +1,6 @@
 from fastapi import APIRouter
-from app.api.endpoints import users, cache
+
+from app.api.endpoints import cache, users
 
 api_router = APIRouter()
 api_router.include_router(users.router)

@@ -1,58 +1,75 @@
-import tempfile
 import json
-import redis.asyncio as redis
-from fastapi import HTTPException
-from app.core.inference_client import CLIENT, MODEL_ID
-from app.models.inference_dto import InferenceResultDTO
-from fastapi import UploadFile
+import os
+import tempfile
+from typing import Any, Dict
 
+from fastapi import HTTPException, UploadFile, status
+
+from app.core.inference_client import CLIENT, MODEL_ID
+from app.core.logging.decorators import monitor_async
+from app.core.redis_client import RedisService
+from app.models.inference_dto import InferenceResultDTO
 
 CACHE_TTL = 3600
-CACHE_KEY_PREFIX = f"inference_{MODEL_ID}"
+CACHE_KEY_PREFIX = f"inference:{MODEL_ID}"
 
 
 class InferenceService:
-    def __init__(self, redis_client: redis.Redis):
-        self.redis_client = redis_client
+    def __init__(self, redis_service: RedisService):
+        self.redis = redis_service
 
-    async def run_inference_with_cache(self, file: UploadFile) -> dict:
+    @monitor_async(operation_name="EXTERNAL_API: Roboflow Inference", log_args=False)
+    async def _execute_external_inference(self, image_path: str) -> Dict[str, Any]:
 
+        return CLIENT.infer(image_path, model_id=MODEL_ID)
 
-        cache_key = f"{CACHE_KEY_PREFIX}_{file.filename}"
+    @monitor_async(operation_name="SERVICE: Inference Pipeline", log_args=False)
+    async def run_inference_with_cache(self, file: UploadFile) -> Dict[str, Any]:
 
-        cached_data = await self.redis_client.get(cache_key)
+        cache_key = f"{CACHE_KEY_PREFIX}:{file.filename}"
+
+        cached_data = await self.redis.get(cache_key)
         if cached_data:
-            print(f">>> Дані Inference для {file.filename} повернуто з Redis Cache!")
+
             return {"source": "cache", "data": json.loads(cached_data)}
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-            content = await file.read()
-
-            tmp.write(content)
-            tmp_path = tmp.name
-
-        print(f">>> Кешу Inference немає, запит до Roboflow для {file.filename}...")
-
+        tmp_path = None
         try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                content = await file.read()
+                tmp.write(content)
+                tmp_path = tmp.name
 
-            raw_data = CLIENT.infer(tmp_path, model_id=MODEL_ID)
-            data_to_cache = json.dumps(raw_data)
-            await self.redis_client.set(cache_key, data_to_cache, ex=CACHE_TTL)
+            raw_data = await self._execute_external_inference(tmp_path)
+
+            await self.redis.set(key=cache_key, value=json.dumps(raw_data), ex=CACHE_TTL)
 
             return {"source": "api", "data": raw_data}
 
         except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Inference provider failed: {str(e)}"
+            )
 
-            raise HTTPException(status_code=500, detail=f"Roboflow API Error: {e}")
+        finally:
 
-    async def run_processed_with_cache(self, file: UploadFile) -> dict:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
-        raw_result = await self.run_inference_with_cache(file)
-        raw_data = raw_result['data']
+    @monitor_async(operation_name="SERVICE: Process Result", log_args=False)
+    async def run_processed_with_cache(self, file: UploadFile) -> Dict[str, Any]:
+        try:
+            raw_result = await self.run_inference_with_cache(file)
+            raw_data = raw_result["data"]
 
-        result = InferenceResultDTO(**raw_data)
+            result_dto = InferenceResultDTO(**raw_data)
 
-        summary = result.summary()
-        summary['source'] = raw_result['source']
+            summary = result_dto.summary()
+            summary["source"] = raw_result["source"]
 
-        return summary
+            return summary
+
+        except KeyError:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid response format from ML model")
+        except Exception as e:
+            raise e

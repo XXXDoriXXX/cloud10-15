@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
 from typing import List
+
+from pydantic import BaseModel, Field
 
 
 class PredictionDTO(BaseModel):
@@ -36,17 +37,14 @@ class InferenceResultDTO(BaseModel):
     def average_confidence(self) -> float:
         if not self.predictions:
             return 0
-        return round(
-            sum(p.confidence for p in self.predictions) / len(self.predictions) * 100, 2
-        )
+        return round(sum(p.confidence for p in self.predictions) / len(self.predictions) * 100, 2)
 
     def summary(self) -> dict:
         return {
             "total_people": self.total_objects,
             "avg_confidence_%": self.average_confidence,
             "detailed_confidences": [
-                {"id": p.detection_id, "confidence_%": p.confidence_percent}
-                for p in self.predictions
+                {"id": p.detection_id, "confidence_%": p.confidence_percent} for p in self.predictions
             ],
             "image_resolution": f"{self.image.width}x{self.image.height}",
             "inference_time_sec": round(self.time, 3),

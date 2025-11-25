@@ -1,7 +1,8 @@
-import httpx
-from fastapi import HTTPException
 import json
+
+import httpx
 import redis.asyncio as redis
+from fastapi import HTTPException
 
 CAT_API_URL = "https://api.thecatapi.com/v1/images/search"
 CACHE_TTL = 60
